@@ -162,7 +162,7 @@ with tab1:
                     'value': 80}}))
         
         fig_gauge.update_layout(height=300, margin=dict(l=20,r=20,t=20,b=20), paper_bgcolor="rgba(0,0,0,0)", font={'family': "Inter"})
-        st.plotly_chart(fig_gauge, width='stretch')
+        st.plotly_chart(fig_gauge, use_container_width=True)
 
 # === TAB 2: DEEP ANALYTICS ===
 with tab2:
@@ -183,7 +183,7 @@ with tab2:
                                color_discrete_map={'Recycle': '#00CC96', 'General': '#EF553B'},
                                template="plotly_white")
             fig_time.update_layout(xaxis_title="Time", yaxis_title="Items Count", hovermode="x unified")
-            st.plotly_chart(fig_time, width='stretch')
+            st.plotly_chart(fig_time, use_container_width=True)
         else:
             st.info("Not enough data for timeline.")
 
@@ -193,7 +193,7 @@ with tab2:
                            color_discrete_sequence=px.colors.qualitative.Pastel)
         fig_pie.update_traces(textposition='inside', textinfo='percent')
         fig_pie.update_layout(showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
-        st.plotly_chart(fig_pie, width='stretch')
+        st.plotly_chart(fig_pie, use_container_width=True)
 
     st.divider()
 
@@ -217,7 +217,7 @@ with tab2:
                                           color_continuous_scale='Viridis',
                                           template="plotly_white")
             fig_heat.update_layout(xaxis_title="Hour of Day", yaxis_title="Day of Week")
-            st.plotly_chart(fig_heat, width='stretch')
+            st.plotly_chart(fig_heat, use_container_width=True)
         else:
             st.info("Insufficient data for heatmap.")
 
@@ -229,7 +229,7 @@ with tab2:
                                color_discrete_map={'Recycle': '#00CC96', 'General': '#EF553B'},
                                barmode='group', template="plotly_white")
         fig_bar.update_layout(xaxis_title="Material Type", yaxis_title="Count")
-        st.plotly_chart(fig_bar, width='stretch')
+        st.plotly_chart(fig_bar, use_container_width=True)
 
     # 3. Export
     st.markdown("---")
