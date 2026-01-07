@@ -1,9 +1,5 @@
 # Smart Dustbin IoT Application on Google Cloud Platform
 
-**Course:** CPC357: IoT Architecture & Smart Applications  
-**Session:** 2025/2026  
-**Project:** Intelligent Waste Classification System
-
 ## Project Overview
 This project is a Proof of Concept (PoC) for a smart dustbin that uses Generative AI (Gemini 2.5) to recognize waste and automatically sort it into "Recyclable" or "General Waste" bins. The system is fully deployed and operational on the Google Cloud Platform (GCP).
 
