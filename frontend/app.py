@@ -7,14 +7,68 @@ from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
 st.set_page_config(
-    page_title="EcoSort Analytics",
+    page_title="EcoSort Command Center",
     layout="wide",
     page_icon="♻️",
     initial_sidebar_state="expanded"
 )
 
+# --- CUSTOM CSS FOR MODERN UI ---
+st.markdown("""
+<style>
+    /* Global Font & Background */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Card Style for Metrics */
+    div[data-testid="metric-container"] {
+        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+        border: 1px solid #e9ecef;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    div[data-testid="metric-container"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+    }
+    
+    /* Chart Containers */
+    .stPlotlyChart {
+        background-color: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        padding: 15px;
+        border: 1px solid #e9ecef;
+    }
+    
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #f8f9fa;
+        border-right: 1px solid #e9ecef;
+    }
+    
+    /* Headers */
+    h1, h2, h3 {
+        color: #2c3e50;
+        font-weight: 700;
+    }
+    
+    /* Custom Divider */
+    hr {
+        margin-top: 2rem;
+        margin-bottom: 2rem;
+        border: 0;
+        border-top: 1px solid #e9ecef;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- FIRESTORE CONNECTION ---
-# Caching the connection to avoid re-initializing on every run
 @st.cache_resource
 def get_db():
     try:
@@ -27,219 +81,246 @@ db = get_db()
 
 # --- HELPER FUNCTIONS ---
 def get_data():
-    """Fetches the last 1000 records from Firestore"""
-    if db is None:
+    """Fetches records from Firestore"""
+    if db is None: return []
+    try:
+        docs = db.collection('waste_logs').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(2000).stream()
+        data = []
+        for doc in docs:
+            d = doc.to_dict()
+            if 'timestamp' in d and d['timestamp'] is not None:
+                d['timestamp'] = d['timestamp'].replace(tzinfo=None)
+            data.append(d)
+        return data
+    except Exception as e:
+        st.error(f"Error fetching data: {e}")
         return []
-    
-    docs = db.collection('waste_logs').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(1000).stream()
-    data = []
-    for doc in docs:
-        d = doc.to_dict()
-        # Convert Firestore Timestamp to Python Datetime
-        if 'timestamp' in d and d['timestamp'] is not None:
-            d['timestamp'] = d['timestamp'].replace(tzinfo=None) # Make naive for pandas
-        data.append(d)
-    return data
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3299/3299908.png", width=80)
     st.title("EcoSort")
-    st.markdown("Smart Waste Management")
+    st.markdown("**Smart City Edition v2.1**")
     st.divider()
     
-    st.subheader("⚙️ Controls")
-    if st.button("🔄 Refresh Data", width='stretch'):
-        st.rerun()
+    # Date Filter
+    st.subheader("📅 Timeframe")
+    
+    raw_data = get_data()
+    if not raw_data:
+        st.warning("No data found.")
+        st.stop()
         
-    st.subheader("🔍 Filters")
+    df = pd.DataFrame(raw_data)
+    if not df.empty and 'timestamp' in df.columns:
+        min_date = df['timestamp'].min().date()
+        max_date = df['timestamp'].max().date()
+    else:
+        min_date = datetime.now().date()
+        max_date = datetime.now().date()
+    
+    date_range = st.date_input("Filter Date", [min_date, max_date], min_value=min_date, max_value=max_date)
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+    else:
+        start_date, end_date = min_date, max_date
 
-raw_data = get_data()
+    # Material Filter
+    st.subheader("🔍 Categories")
+    if 'class' in df.columns:
+        all_classes = ['All'] + sorted(list(df['class'].unique()))
+    else:
+        all_classes = ['All']
+    selected_class = st.selectbox("Select Material", all_classes)
+    
+    st.divider()
+    if st.button("🔄 Force Refresh Data", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
-if not raw_data:
-    st.warning("Waiting for data... Run your simulation script!")
-    st.stop()
-
-df = pd.DataFrame(raw_data)
-
-# Sidebar Filters
-min_date = df['timestamp'].min().date()
-max_date = df['timestamp'].max().date()
-
-try:
-    start_date, end_date = st.sidebar.date_input(
-        "Date Range",
-        [min_date, max_date],
-        min_value=min_date,
-        max_value=max_date
-    )
-except ValueError:
-    start_date, end_date = min_date, max_date
-
-all_classes = ['All'] + sorted(list(df['class'].unique()))
-selected_class = st.sidebar.selectbox("Material Type", all_classes)
-
-# Apply Filters
+# --- DATA PRE-PROCESSING ---
+# 1. Filter Data
 mask = (df['timestamp'].dt.date >= start_date) & (df['timestamp'].dt.date <= end_date)
 if selected_class != 'All':
     mask = mask & (df['class'] == selected_class)
-    
 filtered_df = df.loc[mask]
 
+# 2. Calculate Deltas (Today vs Yesterday)
+today = datetime.now().date()
+yesterday = today - timedelta(days=1)
+
+df_today = df[df['timestamp'].dt.date == today]
+df_yesterday = df[df['timestamp'].dt.date == yesterday]
+
+count_today = len(df_today)
+count_yesterday = len(df_yesterday)
+delta_count = count_today - count_yesterday
+
+recycle_today = len(df_today[df_today['bin'] == 'Recycle'])
+recycle_yesterday = len(df_yesterday[df_yesterday['bin'] == 'Recycle'])
+delta_recycle = recycle_today - recycle_yesterday
+
 # --- MAIN DASHBOARD ---
-st.title("♻️ Dashboard Overview")
-st.markdown(f"**{len(filtered_df)}** waste items analyzed from **{start_date}** to **{end_date}**")
+st.title("♻️ EcoSort Command Center")
+st.markdown(f"Analytics View: **{start_date}** to **{end_date}**")
+st.markdown("---")
 
-# TABS
-tab1, tab2 = st.tabs(["📊 Live Monitor", "📈 Deep Analytics"])
+# === ROW 1: SMART METRICS (HUD) ===
+col1, col2, col3, col4 = st.columns(4)
 
-# === TAB 1: LIVE MONITOR ===
-with tab1:
-    # Top KPIS
-    total_count = len(filtered_df)
-    recycle_count = len(filtered_df[filtered_df['bin'] == 'Recycle'])
+total_count = len(filtered_df)
+recycle_count = len(filtered_df[filtered_df['bin'] == 'Recycle'])
+efficiency = (recycle_count / total_count * 100) if total_count > 0 else 0
+
+with col1:
+    st.metric(label="Total Processed", value=f"{total_count:,}", delta=f"{delta_count} vs yesterday")
+
+with col2:
+    st.metric(label="Recycling Rate", value=f"{efficiency:.1f}%", delta=f"{delta_recycle} items")
+
+with col3:
+    # Bin Fill Level Simulation
+    items_last_24h = len(df[df['timestamp'] > (datetime.now() - timedelta(hours=24))])
+    fill_percentage = min(100, (items_last_24h / 200) * 100)
+    st.metric(label="Bin Fill Level", value=f"{fill_percentage:.0f}%", delta="Live Estimate", delta_color="off")
+
+with col4:
+    # Carbon Saved (0.5kg CO2 per item)
+    co2 = recycle_count * 0.5
+    st.metric(label="Carbon Offset", value=f"{co2:.1f} kg", delta="Sustainability")
+
+# === ROW 2: ADVANCED ANALYTICS ===
+st.subheader("📊 Waste Analytics")
+c1, c2 = st.columns([2, 1])
+
+# Color Palette
+COLOR_RECYCLE = '#10B981' # Emerald 500
+COLOR_GENERAL = '#F59E0B' # Amber 500
+COLOR_MAP = {'Recycle': COLOR_RECYCLE, 'General': COLOR_GENERAL}
+
+with c1:
+    tab1, tab2 = st.tabs(["Composition", "Top Items"])
     
-    # Calculate Efficiency
-    efficiency = (recycle_count / total_count * 100) if total_count > 0 else 0
+    with tab1:
+        # Sunburst Chart
+        if not filtered_df.empty:
+            fig_sun = px.sunburst(
+                filtered_df, 
+                path=['bin', 'class'], 
+                color='bin',
+                color_discrete_map=COLOR_MAP,
+                height=400
+            )
+            fig_sun.update_layout(margin=dict(t=0, l=0, r=0, b=0))
+            st.plotly_chart(fig_sun, use_container_width=True)
+        else:
+            st.info("No data available for the selected period.")
+
+    with tab2:
+        # Top Items Bar Chart
+        if not filtered_df.empty:
+            top_items = filtered_df['class'].value_counts().head(10).reset_index()
+            top_items.columns = ['Item', 'Count']
+            fig_bar = px.bar(
+                top_items, 
+                x='Count', 
+                y='Item', 
+                orientation='h',
+                color='Count',
+                color_continuous_scale='Teal',
+                title="Top 10 Waste Categories"
+            )
+            fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, height=400)
+            st.plotly_chart(fig_bar, use_container_width=True)
+        else:
+            st.info("No data available.")
+
+with c2:
+    # Gauge Chart
+    fig_gauge = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = fill_percentage,
+        title = {'text': "Bin Capacity", 'font': {'size': 20}},
+        gauge = {
+            'axis': {'range': [None, 100]},
+            'bar': {'color': "#2c3e50"},
+            'steps': [
+                {'range': [0, 50], 'color': COLOR_RECYCLE},
+                {'range': [50, 80], 'color': COLOR_GENERAL},
+                {'range': [80, 100], 'color': "#EF4444"} # Red 500
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': 90
+            }
+        }
+    ))
+    fig_gauge.update_layout(height=350, margin=dict(t=50, l=20, r=20, b=20))
+    st.plotly_chart(fig_gauge, use_container_width=True)
     
-    # Carbon Footprint (0.5kg CO2 saved per recycled item - illustrative)
-    carbon_saved = recycle_count * 0.5 
-    
-    # Most Common Item
-    if not filtered_df.empty:
-        most_common = filtered_df['class'].mode()[0]
+    # Smart Insights
+    st.markdown("### 💡 Smart Insights")
+    if efficiency > 50:
+        st.success(f"Great job! Recycling rate is high at **{efficiency:.1f}%**.")
     else:
-        most_common = "N/A"
-
-    # KPI Row
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("Total Items", f"{total_count}", delta="Processed")
-    kpi2.metric("Recycling Rate", f"{efficiency:.1f}%", delta="Target: 80%")
-    kpi3.metric("Carbon Saved", f"{carbon_saved:.1f} kg", delta="Est. CO2")
-    kpi4.metric("Top Material", most_common.title())
-
-    st.markdown("---")
-
-    # Visuals Row 1
-    c1, c2 = st.columns([2, 1])
-    
-    with c1:
-        st.subheader("Recent Activity")
-        # Styled Dataframe
-        display_df = filtered_df[['timestamp', 'class', 'bin', 'device_id']].head(10).copy()
-        display_df['timestamp'] = display_df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        st.warning(f"Recycling rate is low (**{efficiency:.1f}%**). Consider educational campaigns.")
         
-        st.dataframe(
-            display_df,
-            width='stretch',
-            column_config={
-                "timestamp": "Time",
-                "class": "Material",
-                "bin": st.column_config.TextColumn("Bin", help="Recycle or General"),
-                "device_id": "Device"
-            },
-            hide_index=True
+    if fill_percentage > 80:
+        st.error("⚠️ Bin is almost full! Schedule a pickup soon.")
+
+# === ROW 3: TEMPORAL TRENDS ===
+st.subheader("📈 Trends & Patterns")
+tab_trend, tab_heat = st.tabs(["Daily Efficiency", "Activity Heatmap"])
+
+with tab_trend:
+    if not filtered_df.empty:
+        # Daily Recycling Rate Trend
+        daily_stats = filtered_df.groupby([filtered_df['timestamp'].dt.date, 'bin']).size().unstack(fill_value=0)
+        if 'Recycle' not in daily_stats.columns: daily_stats['Recycle'] = 0
+        if 'General' not in daily_stats.columns: daily_stats['General'] = 0
+        
+        daily_stats['Total'] = daily_stats['Recycle'] + daily_stats['General']
+        daily_stats['Efficiency'] = (daily_stats['Recycle'] / daily_stats['Total']) * 100
+        
+        fig_line = px.line(
+            daily_stats, 
+            y='Efficiency', 
+            markers=True,
+            title="Daily Recycling Efficiency (%)",
+            color_discrete_sequence=[COLOR_RECYCLE]
         )
+        fig_line.update_yaxes(range=[0, 105])
+        st.plotly_chart(fig_line, use_container_width=True)
+    else:
+        st.info("No data for trends.")
 
-    with c2:
-        st.subheader("Efficiency Gauge")
-        fig_gauge = go.Figure(go.Indicator(
-            mode = "gauge+number",
-            value = efficiency,
-            domain = {'x': [0, 1], 'y': [0, 1]},
-            gauge = {
-                'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
-                'bar': {'color': "#00CC96"},
-                'bgcolor': "white",
-                'borderwidth': 2,
-                'bordercolor': "gray",
-                'steps': [
-                    {'range': [0, 50], 'color': "#f8f9fa"},
-                    {'range': [50, 80], 'color': "#e9ecef"}],
-                'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
-                    'value': 80}}))
+with tab_heat:
+    if not filtered_df.empty:
+        hm_df = filtered_df.copy()
+        hm_df['Day'] = hm_df['timestamp'].dt.day_name()
+        hm_df['Hour'] = hm_df['timestamp'].dt.hour
         
-        fig_gauge.update_layout(height=300, margin=dict(l=20,r=20,t=20,b=20), paper_bgcolor="rgba(0,0,0,0)", font={'family': "Inter"})
-        st.plotly_chart(fig_gauge, use_container_width=True)
-
-# === TAB 2: DEEP ANALYTICS ===
-with tab2:
-    st.markdown("### 📈 Historical Trends & Insights")
-    
-    # 1. Timeline & Composition
-    row2_c1, row2_c2 = st.columns([2, 1])
-    
-    with row2_c1:
-        st.subheader("Waste Generation Over Time")
-        # Group by Hour
-        timeline_df = filtered_df.copy()
-        timeline_df['hour'] = timeline_df['timestamp'].dt.floor('h')
-        hourly_counts = timeline_df.groupby(['hour', 'bin']).size().reset_index(name='count')
-        
-        if not hourly_counts.empty:
-            fig_time = px.area(hourly_counts, x='hour', y='count', color='bin', 
-                               color_discrete_map={'Recycle': '#00CC96', 'General': '#EF553B'},
-                               template="plotly_white")
-            fig_time.update_layout(xaxis_title="Time", yaxis_title="Items Count", hovermode="x unified")
-            st.plotly_chart(fig_time, use_container_width=True)
-        else:
-            st.info("Not enough data for timeline.")
-
-    with row2_c2:
-        st.subheader("Material Composition")
-        fig_pie = px.pie(filtered_df, names='class', hole=0.5, 
-                           color_discrete_sequence=px.colors.qualitative.Pastel)
-        fig_pie.update_traces(textposition='inside', textinfo='percent')
-        fig_pie.update_layout(showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-    st.divider()
-
-    # 2. Advanced Analytics: Heatmap & Bar Chart
-    row3_c1, row3_c2 = st.columns(2)
-    
-    with row3_c1:
-        st.subheader("🔥 Activity Heatmap")
-        # Heatmap: Day of Week vs Hour
-        heatmap_df = filtered_df.copy()
-        heatmap_df['day_name'] = heatmap_df['timestamp'].dt.day_name()
-        heatmap_df['hour'] = heatmap_df['timestamp'].dt.hour
-        
-        # Order days
+        heatmap_data = hm_df.groupby(['Day', 'Hour']).size().reset_index(name='Count')
         days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        heatmap_data = heatmap_df.groupby(['day_name', 'hour']).size().reset_index(name='count')
         
-        if not heatmap_data.empty:
-            fig_heat = px.density_heatmap(heatmap_data, x='hour', y='day_name', z='count',
-                                          nbinsx=24, category_orders={'day_name': days_order},
-                                          color_continuous_scale='Viridis',
-                                          template="plotly_white")
-            fig_heat.update_layout(xaxis_title="Hour of Day", yaxis_title="Day of Week")
-            st.plotly_chart(fig_heat, use_container_width=True)
-        else:
-            st.info("Insufficient data for heatmap.")
-
-    with row3_c2:
-        st.subheader("📊 Bin Accuracy by Material")
-        # Stacked bar chart to show if items are going to the right bin
-        # Assuming 'class' determines the bin, but here we show actual bin distribution per class
-        fig_bar = px.histogram(filtered_df, x='class', color='bin', 
-                               color_discrete_map={'Recycle': '#00CC96', 'General': '#EF553B'},
-                               barmode='group', template="plotly_white")
-        fig_bar.update_layout(xaxis_title="Material Type", yaxis_title="Count")
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-    # 3. Export
-    st.markdown("---")
-    col_export, _ = st.columns([1, 3])
-    with col_export:
-        csv = filtered_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Full Report (CSV)",
-            data=csv,
-            file_name=f'waste_report_{datetime.now().strftime("%Y%m%d")}.csv',
-            mime='text/csv',
-            width='stretch'
+        fig_heat = px.density_heatmap(
+            heatmap_data, x='Hour', y='Day', z='Count',
+            nbinsx=24, category_orders={'Day': days_order},
+            color_continuous_scale='Tealgrn',
+            title="Peak Usage Heatmap"
         )
+        st.plotly_chart(fig_heat, use_container_width=True)
+    else:
+        st.info("No data for heatmap.")
+
+# === ROW 4: DATA EXPORT ===
+with st.expander("📂 View Raw Data & Export"):
+    st.dataframe(filtered_df, use_container_width=True)
+    csv = filtered_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download CSV Report",
+        data=csv,
+        file_name=f'ecosort_report_{start_date}_{end_date}.csv',
+        mime='text/csv'
+    )
