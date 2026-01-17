@@ -12,3 +12,4 @@ Thumbs.db
 *.json
 key.json
 service-account.json
+**/secrets.h
