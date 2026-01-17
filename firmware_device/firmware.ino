@@ -9,8 +9,8 @@ const int serverPort = 443;
 const unsigned long SERIAL_TIMEOUT = 5000;
 const int BUFFER_SIZE = 1024; 
 
-#define SERVO_PIN 12 
-#define LED_PIN   2
+#define SERVO_PIN 5
+#define LED_PIN   4
 
 WiFiClientSecure client;
 Servo sortingServo;
@@ -130,7 +130,7 @@ void handleCloudResponse() {
     Serial.println(binType);
 
     if (String(binType) == "Recycle") {
-      openBin(90);
+      openBin(0);
     } else {
       openBin(180);
     }
@@ -140,5 +140,5 @@ void handleCloudResponse() {
 void openBin(int angle) {
   sortingServo.write(angle);
   delay(3000);
-  sortingServo.write(0);
+  sortingServo.write(90);
 }
