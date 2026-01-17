@@ -95,7 +95,7 @@ gcloud run deploy dustbin-dashboard --source . --region=asia-southeast1 --allow-
     *   Aim camera at trash.
     *   Press **[SPACE]** to capture.
     *   *Watch the terminal:* You will see the image streaming to ESP32, then the Cloud response.
-    *   *Watch the servo:* It will move to 90° (Recycle) or 180° (General).
+    *   *Watch the servo:* It will move to 0° (Recycle) or 180° (General).
 4.  **Stop:** Press **[Q]** to quit.
 
 ## 📊 Analytics Dashboard
