@@ -3,8 +3,8 @@ from google.cloud import firestore
 import vertexai
 from vertexai.generative_models import GenerativeModel, Part
 
-PROJECT_ID = os.environ.get("GCP_PROJECT_ID") 
-LOCATION = os.environ.get("GCP_LOCATION", "us-central1") 
+PROJECT_ID = "smart-dustbin-483608" 
+LOCATION = "us-central1"
 
 try:
     db = firestore.Client()
