@@ -127,7 +127,7 @@ with st.sidebar:
     selected_class = st.selectbox("Select Material", all_classes)
     
     st.divider()
-    if st.button("🔄 Force Refresh Data", type="primary", use_container_width=True):
+    if st.button("🔄 Refresh Data", type="secondary", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
@@ -233,29 +233,52 @@ with c2:
         st.info("No data available for the selected period.")
 
 # === ROW 3: TEMPORAL TRENDS ===
-st.subheader("📈 Activity Heatmap")
+st.subheader("📈 Temporal Trends")
 
-if not filtered_df.empty:
-    hm_df = filtered_df.copy()
-    hm_df['Day'] = hm_df['timestamp'].dt.day_name()
-    hm_df['Hour'] = hm_df['timestamp'].dt.hour
+tab1, tab2 = st.tabs(["Activity Heatmap", "Waste Generation Over Time"])
+
+with tab1:
+    if not filtered_df.empty:
+        hm_df = filtered_df.copy()
+        hm_df['Day'] = hm_df['timestamp'].dt.day_name()
+        hm_df['Hour'] = hm_df['timestamp'].dt.hour
+        
+        heatmap_data = hm_df.groupby(['Day', 'Hour']).size().reset_index(name='Count')
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        fig_heat = px.density_heatmap(
+            heatmap_data, x='Hour', y='Day', z='Count',
+            nbinsx=24, category_orders={'Day': days_order},
+            color_continuous_scale='Tealgrn',
+            title="Peak Usage Heatmap"
+        )
+        fig_heat.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
+    else:
+        st.info("No data for heatmap.")
+
+with tab2:
+    # Group by Hour
+    timeline_df = filtered_df.copy()
+    timeline_df['hour'] = timeline_df['timestamp'].dt.floor('h')
+    hourly_counts = timeline_df.groupby(['hour', 'bin']).size().reset_index(name='count')
     
-    heatmap_data = hm_df.groupby(['Day', 'Hour']).size().reset_index(name='Count')
-    days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    
-    fig_heat = px.density_heatmap(
-        heatmap_data, x='Hour', y='Day', z='Count',
-        nbinsx=24, category_orders={'Day': days_order},
-        color_continuous_scale='Tealgrn',
-        title="Peak Usage Heatmap"
-    )
-    fig_heat.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)'
-    )
-    st.plotly_chart(fig_heat, use_container_width=True)
-else:
-    st.info("No data for heatmap.")
+    if not hourly_counts.empty:
+        fig_time = px.area(hourly_counts, x='hour', y='count', color='bin', 
+                           color_discrete_map={'Recycle': '#00CC96', 'General': '#EF553B'})
+        fig_time.update_layout(
+            xaxis_title="Time", 
+            yaxis_title="Items Count", 
+            hovermode="x unified",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_time, use_container_width=True)
+    else:
+        st.info("Not enough data for timeline.")
 
 # === ROW 4: DATA EXPORT ===
 with st.expander("📂 View Raw Data & Export"):
